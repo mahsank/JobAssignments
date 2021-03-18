@@ -170,7 +170,7 @@ class SimulateX2(object):
         pass
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser("SimulateX2", description="A class to simulate a \
+    parser = argparse.ArgumentParser(description="A class to simulate a \
             satellite with SGP4 propagation model")
     parser.add_argument("catnr", help="NORAD catalog number of the satellite.", type=int)
     parser.add_argument("xdays", help="Number of days to propagate the satellite using \
