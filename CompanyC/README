@@ -1,0 +1,176 @@
+Problem Statement
+=================
+
+Debian uses *deb packages to deploy and upgrade software. The packages are stored in repositories and each repository
+contains the so called "Contents index". The format of that file is well described here
+https://wiki.debian.org/RepositoryFormat#A.22Contents.22_indices
+
+Your task is to develop a python command line tool that takes the architecture (amd64, arm64, mips etc.) as an argument
+and downloads the compressed Contents file associated with it from a Debian mirror. The program should parse the file
+and output the statistics of the top 10 packages that have the most files associated with them. An example output could
+be:
+
+./package_statistics.py amd64
+
+* <package name 1>    <number of files>
+* <package name 2>    <number of files>
+
+......
+
+* <package name 10>    <number of files>
+
+You can use the following Debian mirror: http://ftp.uk.debian.org/debian/dists/stable/main/. Please try to follow
+Python's best practices in your solution. Hint: there are tools that can help you verify your code is compliant. In-line
+comments are appreciated.
+
+Understanding the problem
+=========================
+
+In order to better understand the problem, I started reading the wiki page. According to wiki, contents indices refer to
+architecture specific gz files `dists/$DIST/$COMP/Contents-$ARCH.gz` and `dists/$DIST/$COMP/Contents-udeb-$ARCH.gz` for
+udebs.
+
+According to the provided Debian mirror address, it was straight forward to deduce that `$DIST` corresponds to `stable`,
+`$COMP` corresponds to `main` and the variable `$ARCH` implies either a binary processor architecture (such as amd64,
+arm64, mips etc.) or the pseudo-architecture `source` that represents source packages.
+
+As a next step, I downloaded the file `Contents-amd64.gz`, ran the following commands to get a feel of the file I will
+be dealing with.
+
+    $ curl -s -O http://ftp.uk.debian.org/debian/dists/stable/main/Contents-amd64.gz
+    $ gunzip -k Contents-amd64.gz
+    $ du -sh *
+    123M    Contents-amd64
+    9.8M    Contents-amd64.gz
+    $ wc -l Contents-amd64
+    1450097 Contents-amd64
+
+The above information indicates that the decompressed file size is **123MiB** and file has a total of **1450097** lines.
+Similarly, the size of decompressed `Contents-arm64` file is **117MiB** with **1373477** lines.  This information
+regarding architecture files gave me a pretty good idea about what kind of file sizes and lines I will be dealing with.
+It also prompted the fact that the Python file manipulation program should be quite efficient and fast as reading a file
+with size as big as 123MiB and lines as long as 1540097 might be somewhat time consuming and program speed inevitably
+becomes important.
+
+The next step of understanding the problem was to go through the file architecture and figure out what kind of
+information is available in the file and how is it organized.
+According to wiki, Contents indices begin with zero or more lines of free form text followed by a table mapping
+filenames to one or more packages. The table `SHALL` have two columns, separated by one or more spaces. The first row of
+the table `SHOULD` have the columns **FILE** and **LOCATION**, the following rows shall have the following columns:
+
+    1. A filename relative to the root directory, without leading . (dot)
+    2. A list of qualified package names, separated by comma. A qualified package name has the form
+    `[[$AREA/]$SECTION/]$NAME`, where `$AREA` is the archive area, `$SECTION` the package section, and `$NAME` the name
+    of the package. Inclusion of the area in the name should be considered deprecated.
+
+Based on the above information, I mapped the file contents as follows:
+
+    $ less Contents-amd64
+    bin/afio                                                utils/afio
+    ...
+    bin/bsd-csh                                             shells/csh
+    bin/btrfs                                               admin/btrfs-progs
+    bin/btrfs-convert                                       admin/btrfs-progs
+    bin/btrfs-find-root                                     admin/btrfs-progs
+    bin/btrfs-image                                         admin/btrfs-progs
+    bin/btrfs-map-logical                                   admin/btrfs-progs
+    bin/btrfs-select-super                                  admin/btrfs-progs
+    bin/btrfsck                                             admin/btrfs-progs
+    bin/btrfstune                                           admin/btrfs-progs
+    bin/bunzip2                                             utils/bzip2
+    bin/busybox                                             utils/busybox,shells/busybox-static
+    bin/bzcat                                               utils/bzip2
+    bin/bzcmp                                               utils/bzip2
+    bin/bzdiff                                              utils/bzip2
+    bin/bzegrep                                             utils/bzip2
+    bin/bzexe                                               utils/bzip2
+    bin/bzfgrep                                             utils/bzip2
+    bin/bzgrep                                              utils/bzip2
+    bin/bzip2                                               utils/bzip2
+    ...
+    bin/zcat                                                utils/gzip,utils/zutils
+    bin/zcmp                                                utils/gzip,utils/zutils
+    bin/zdiff                                               utils/gzip,utils/zutils
+    bin/zegrep                                              utils/gzip,utils/zutils
+    bin/zfgrep                                              utils/gzip,utils/zutils
+    ...
+
+The above output of `less` displays the table having two columns separated by multiple spaces. In order to better
+understand the problem, I mapped the above wiki contents on an actual row in the table and used `bzip2` utility as an
+example. As per my understanding, the `SHOULD` clause on first row of the table is not available as such and is omitted
+in the actual file.  Most of the entries in the actual compressed file and shown in the excerpt above follow the
+structure suggested for the rows subsequent to first row. For example, the row `bin/gunzip` indicates that the file is
+`gunzip` and the location is `bin/gunzip`. Similarly, the clause `utils/gzip` implies that the value of `$SECTION`
+corresponds to `utils` and the value of `$NAME` corresponds to `gzip`. The comma separated qualified package names'
+example is visible in the clause `utils/gzip,utils/zutils`.
+
+Based on all the information discussed so far, my task is to develop a Python utility that lists the top 10 packages
+(`$NAME`) and number of files associated with them.
+
+Proposed solution and thought process
+=====================================
+
+I decided to divide the solution in various smaller parts and solve them one by one. My approach can be considered as
+divide and conquer coding strategy. An initial rough sketch was the following:
+
+    - Based on the architecture info, download the gzip compressed file
+    - Read the file contents line by line
+    - Convert the file contents in a dictionary or json object
+    - Based on the converted object, get an idea about the top ten packages with most files associated with them
+
+After doing more investigation, I realized that this solution is not feasible at all as the file size is huge and
+reading the file line by line would be highly inefficient and slow.
+
+I started digging through the Internet to get an idea what could be the best way to handle the situation where you need
+to read a large file with millions of lines. My search soon landed me to Python *pandas* library and there were many
+hints and pointers online which suggested *pandas* being the best solution to solve the problem at hand. I had never
+used pandas library before so I started digging through it. An extensive 2-3 hours review of pandas gave me enough
+background to solve the problem. I modified my original approach as follows:
+
+    - Based on the architecture info, download and save the gzip compressed file
+    - Use pandas to get the information about the utilities with most number of files associated with them
+    - Reuse the downloaded architecture file for subsequent queries
+
+As the structure of the file corresonds to a table where the first column contains the files and their paths and the
+second column contains the name of the utility associated with each file, the utility will appear in the second column
+as many times as its files appear in the first column. This gave me idea that I need to count the most frequently
+occurred utilities and this counting will provide the result I am looking for. In statistical terms, I was looking for
+the repeated **mode** of the second column.
+
+This information also revealed that it is even possible to deduce the solution from second column only. Based on these
+lines, I wrote the accompanying code. Originally, the code was written to find the top 10 utilities or packages with
+highest number of files associated with them but later on I modified the program in such a way that it is possible to
+get an arbitrary number of utilities with highest number of files associated with them.
+
+Time spent on writing the code
+==============================
+
+It took me around one and an half hour to understand the question and then converting my own understanding into words
+and updating the README.
+
+The initial version of the code was generated in about 3 hours. Subsequent development on top of the initial code was
+quite easy and fast.
+
+I spent around 2-3 hours on Python pandas library to get enough understanding to solve the problem.
+
+The overall time to develop from zero to fully functional code can be considered 7-8 hours.
+
+Example usage and run
+=====================
+
+The `package_statistics.py` utility comes with help and it is easy to invoke help.
+
+    $ ./package_statistics.py -h|--help
+
+The utility takes two input arguments, processor architecture and number of top n entries to display. Both the arguments
+are mandatory. The processor architecture selection is confined to certain processor architectures. Please see the list
+of choices in the help to figure out the supported processor architecture.
+
+Below are few commands for the example run:
+
+    $ ./package_statistics.py --arch amd64 --max-file-packages 10
+
+Final thoughts
+==============
+
+Finally, thank you for providing me an opportunity to work on this assignment. I thoroughly enjoyed solving the task.
